@@ -114,31 +114,51 @@ class BinanceMonitor:
         self.bt_limit_entry = ttk.Entry(row1, width=10)
         self.bt_limit_entry.pack(side=tk.LEFT, padx=5)
         
-        # 买入策略
+        # 做多策略
         row2 = ttk.Frame(param_frame)
         row2.pack(fill=tk.X, pady=5)
-        ttk.Label(row2, text="买入策略:", width=12).pack(side=tk.LEFT)
-        self.buy_strategy_var = tk.StringVar()
-        self.buy_strategy_combo = ttk.Combobox(row2, textvariable=self.buy_strategy_var, 
+        ttk.Label(row2, text="做多策略:", width=12).pack(side=tk.LEFT)
+        self.long_strategy_var = tk.StringVar()
+        self.long_strategy_combo = ttk.Combobox(row2, textvariable=self.long_strategy_var, 
                                                 values=list(STRATEGIES.keys()), width=18, state="readonly")
-        self.buy_strategy_combo.pack(side=tk.LEFT, padx=5)
+        self.long_strategy_combo.pack(side=tk.LEFT, padx=5)
         
-        # 卖出策略
-        ttk.Label(row2, text="卖出策略:", width=12).pack(side=tk.LEFT, padx=(20, 0))
-        self.sell_strategy_var = tk.StringVar()
-        self.sell_strategy_combo = ttk.Combobox(row2, textvariable=self.sell_strategy_var,
+        # 平多策略
+        ttk.Label(row2, text="平多策略:", width=12).pack(side=tk.LEFT, padx=(20, 0))
+        self.close_long_strategy_var = tk.StringVar()
+        self.close_long_strategy_combo = ttk.Combobox(row2, textvariable=self.close_long_strategy_var,
                                                  values=list(STRATEGIES.keys()), width=18, state="readonly")
-        self.sell_strategy_combo.pack(side=tk.LEFT, padx=5)
+        self.close_long_strategy_combo.pack(side=tk.LEFT, padx=5)
         
-        # 初始资金
+        # 做空策略
         row3 = ttk.Frame(param_frame)
         row3.pack(fill=tk.X, pady=5)
-        ttk.Label(row3, text="初始资金:", width=12).pack(side=tk.LEFT)
-        self.capital_entry = ttk.Entry(row3, width=20)
+        ttk.Label(row3, text="做空策略:", width=12).pack(side=tk.LEFT)
+        self.short_strategy_var = tk.StringVar()
+        self.short_strategy_combo = ttk.Combobox(row3, textvariable=self.short_strategy_var,
+                                                 values=list(STRATEGIES.keys()), width=18, state="readonly")
+        self.short_strategy_combo.pack(side=tk.LEFT, padx=5)
+        
+        # 平空策略
+        ttk.Label(row3, text="平空策略:", width=12).pack(side=tk.LEFT, padx=(20, 0))
+        self.close_short_strategy_var = tk.StringVar()
+        self.close_short_strategy_combo = ttk.Combobox(row3, textvariable=self.close_short_strategy_var,
+                                                       values=list(STRATEGIES.keys()), width=18, state="readonly")
+        self.close_short_strategy_combo.pack(side=tk.LEFT, padx=5)
+        
+        # 初始资金和杠杆
+        row4 = ttk.Frame(param_frame)
+        row4.pack(fill=tk.X, pady=5)
+        ttk.Label(row4, text="初始资金:", width=12).pack(side=tk.LEFT)
+        self.capital_entry = ttk.Entry(row4, width=20)
         self.capital_entry.pack(side=tk.LEFT, padx=5)
         
+        ttk.Label(row4, text="杠杆倍数:", width=12).pack(side=tk.LEFT, padx=(20, 0))
+        self.leverage_entry = ttk.Entry(row4, width=10)
+        self.leverage_entry.pack(side=tk.LEFT, padx=5)
+        
         # 开始回测按钮
-        self.backtest_btn = ttk.Button(row3, text="开始回测", command=self.run_backtest)
+        self.backtest_btn = ttk.Button(row4, text="开始回测", command=self.run_backtest)
         self.backtest_btn.pack(side=tk.LEFT, padx=20)
         
         # 结果显示框架
@@ -349,15 +369,21 @@ class BinanceMonitor:
             symbol = self.bt_symbol_entry.get().upper()
             limit = int(self.bt_limit_entry.get())
             initial_capital = float(self.capital_entry.get())
-            buy_strategy_name = self.buy_strategy_var.get()
-            sell_strategy_name = self.sell_strategy_var.get()
+            leverage = int(self.leverage_entry.get())
+            long_strategy_name = self.long_strategy_var.get()
+            close_long_strategy_name = self.close_long_strategy_var.get()
+            short_strategy_name = self.short_strategy_var.get()
+            close_short_strategy_name = self.close_short_strategy_var.get()
             
             # 保存配置
             self.config.set("backtest", "symbol", symbol)
             self.config.set("backtest", "limit", limit)
             self.config.set("backtest", "initial_capital", initial_capital)
-            self.config.set("backtest", "buy_strategy", buy_strategy_name)
-            self.config.set("backtest", "sell_strategy", sell_strategy_name)
+            self.config.set("backtest", "leverage", leverage)
+            self.config.set("backtest", "long_strategy", long_strategy_name)
+            self.config.set("backtest", "close_long_strategy", close_long_strategy_name)
+            self.config.set("backtest", "short_strategy", short_strategy_name)
+            self.config.set("backtest", "close_short_strategy", close_short_strategy_name)
             
             self.result_text.delete(1.0, tk.END)
             self.result_text.insert(tk.END, "正在获取历史数据...\n")
@@ -366,8 +392,9 @@ class BinanceMonitor:
             
             # 在新线程中运行回测
             thread = threading.Thread(target=self._run_backtest_thread, 
-                                     args=(symbol, limit, initial_capital, 
-                                          buy_strategy_name, sell_strategy_name),
+                                     args=(symbol, limit, initial_capital, leverage,
+                                          long_strategy_name, close_long_strategy_name,
+                                          short_strategy_name, close_short_strategy_name),
                                      daemon=True)
             thread.start()
             
@@ -390,13 +417,24 @@ class BinanceMonitor:
         initial_capital = self.config.get("backtest", "initial_capital", 10000)
         self.capital_entry.insert(0, str(initial_capital))
         
-        buy_strategy = self.config.get("backtest", "buy_strategy", list(STRATEGIES.keys())[0])
-        self.buy_strategy_var.set(buy_strategy)
+        leverage = self.config.get("backtest", "leverage", 5)
+        self.leverage_entry.insert(0, str(leverage))
         
-        sell_strategy = self.config.get("backtest", "sell_strategy", list(STRATEGIES.keys())[0])
-        self.sell_strategy_var.set(sell_strategy)
+        long_strategy = self.config.get("backtest", "long_strategy", list(STRATEGIES.keys())[0])
+        self.long_strategy_var.set(long_strategy)
+        
+        close_long_strategy = self.config.get("backtest", "close_long_strategy", list(STRATEGIES.keys())[0])
+        self.close_long_strategy_var.set(close_long_strategy)
+        
+        short_strategy = self.config.get("backtest", "short_strategy", list(STRATEGIES.keys())[0])
+        self.short_strategy_var.set(short_strategy)
+        
+        close_short_strategy = self.config.get("backtest", "close_short_strategy", list(STRATEGIES.keys())[0])
+        self.close_short_strategy_var.set(close_short_strategy)
     
-    def _run_backtest_thread(self, symbol, limit, initial_capital, buy_strategy_name, sell_strategy_name):
+    def _run_backtest_thread(self, symbol, limit, initial_capital, leverage,
+                            long_strategy_name, close_long_strategy_name,
+                            short_strategy_name, close_short_strategy_name):
         """回测线程"""
         try:
             # 获取历史K线数据

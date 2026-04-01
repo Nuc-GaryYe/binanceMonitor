@@ -43,8 +43,11 @@ class Config:
                 "symbol": "BTCUSDT",
                 "limit": 500,
                 "initial_capital": 10000,
-                "buy_strategy": "MA5/60交叉",
-                "sell_strategy": "MA5/60交叉"
+                "leverage": 5,
+                "long_strategy": "MA5/60交叉",
+                "close_long_strategy": "MA5/60交叉",
+                "short_strategy": "MA5/60交叉",
+                "close_short_strategy": "MA5/60交叉"
             }
         }
     
