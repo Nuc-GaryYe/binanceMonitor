@@ -41,6 +41,7 @@ class Config:
             },
             "backtest": {
                 "symbol": "BTCUSDT",
+                "interval": "1m",
                 "limit": 500,
                 "initial_capital": 10000,
                 "leverage": 5,

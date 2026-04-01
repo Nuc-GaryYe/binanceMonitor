@@ -102,12 +102,18 @@ class BinanceMonitor:
         param_frame = ttk.LabelFrame(parent, text="回测参数", padding="10")
         param_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        # 交易对
+        # 交易对和K线周期
         row1 = ttk.Frame(param_frame)
         row1.pack(fill=tk.X, pady=5)
         ttk.Label(row1, text="交易对:", width=12).pack(side=tk.LEFT)
         self.bt_symbol_entry = ttk.Entry(row1, width=20)
         self.bt_symbol_entry.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Label(row1, text="K线周期:", width=12).pack(side=tk.LEFT, padx=(20, 0))
+        self.interval_var = tk.StringVar()
+        self.interval_combo = ttk.Combobox(row1, textvariable=self.interval_var,
+                                          values=["1m", "3m", "5m", "15m"], width=10, state="readonly")
+        self.interval_combo.pack(side=tk.LEFT, padx=5)
         
         # K线数量
         ttk.Label(row1, text="K线数量:", width=12).pack(side=tk.LEFT, padx=(20, 0))
@@ -233,9 +239,13 @@ class BinanceMonitor:
         ws_thread.start()
     
     def get_klines(self, symbol, limit=60):
-        """获取连续合约K线数据"""
+        """获取连续合约K线数据（1分钟）"""
+        return self.get_klines_with_interval(symbol, "1m", limit)
+    
+    def get_klines_with_interval(self, symbol, interval, limit=60):
+        """获取连续合约K线数据（指定周期）"""
         try:
-            url = f"https://fapi.binance.com/fapi/v1/continuousKlines?pair={symbol}&contractType=PERPETUAL&interval=1m&limit={limit}"
+            url = f"https://fapi.binance.com/fapi/v1/continuousKlines?pair={symbol}&contractType=PERPETUAL&interval={interval}&limit={limit}"
             proxies = {
                 'http': 'http://127.0.0.1:7890',
                 'https': 'http://127.0.0.1:7890'
@@ -376,6 +386,7 @@ class BinanceMonitor:
         try:
             # 获取参数
             symbol = self.bt_symbol_entry.get().upper()
+            interval = self.interval_var.get()
             limit = int(self.bt_limit_entry.get())
             initial_capital = float(self.capital_entry.get())
             leverage = int(self.leverage_entry.get())
@@ -387,6 +398,7 @@ class BinanceMonitor:
             
             # 保存配置
             self.config.set("backtest", "symbol", symbol)
+            self.config.set("backtest", "interval", interval)
             self.config.set("backtest", "limit", limit)
             self.config.set("backtest", "initial_capital", initial_capital)
             self.config.set("backtest", "leverage", leverage)
@@ -403,7 +415,7 @@ class BinanceMonitor:
             
             # 在新线程中运行回测
             thread = threading.Thread(target=self._run_backtest_thread, 
-                                     args=(symbol, limit, initial_capital, leverage, full_position,
+                                     args=(symbol, interval, limit, initial_capital, leverage, full_position,
                                           long_strategy_name, close_long_strategy_name,
                                           short_strategy_name, close_short_strategy_name),
                                      daemon=True)
@@ -421,6 +433,9 @@ class BinanceMonitor:
         # 加载回测配置
         bt_symbol = self.config.get("backtest", "symbol", "BTCUSDT")
         self.bt_symbol_entry.insert(0, bt_symbol)
+        
+        interval = self.config.get("backtest", "interval", "1m")
+        self.interval_var.set(interval)
         
         bt_limit = self.config.get("backtest", "limit", 500)
         self.bt_limit_entry.insert(0, str(bt_limit))
@@ -446,15 +461,16 @@ class BinanceMonitor:
         close_short_strategy = self.config.get("backtest", "close_short_strategy", list(STRATEGIES.keys())[0])
         self.close_short_strategy_var.set(close_short_strategy)
     
-    def _run_backtest_thread(self, symbol, limit, initial_capital, leverage, full_position,
+    def _run_backtest_thread(self, symbol, interval, limit, initial_capital, leverage, full_position,
                             long_strategy_name, close_long_strategy_name,
                             short_strategy_name, close_short_strategy_name):
         """回测线程"""
         try:
             # 获取历史K线数据
-            klines = self.get_klines(symbol, limit)
+            klines = self.get_klines_with_interval(symbol, interval, limit)
             
             self.result_text.insert(tk.END, f"获取到 {len(klines)} 根K线数据\n")
+            self.result_text.insert(tk.END, f"K线周期: {interval}\n")
             self.result_text.insert(tk.END, f"杠杆倍数: {leverage}x\n")
             self.result_text.insert(tk.END, f"仓位模式: {'全仓' if full_position else '固定仓位'}\n")
             self.result_text.insert(tk.END, f"做多策略: {long_strategy_name}\n")
