@@ -5,7 +5,7 @@ Binance合约实时价格监控工具
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, scrolledtext
 import requests
 import threading
 import time
@@ -15,13 +15,15 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 import matplotlib.dates as mdates
 from collections import deque
+from strategy import get_strategy, STRATEGIES
+from backtest import BacktestEngine
 
 
 class BinanceMonitor:
     def __init__(self, root):
         self.root = root
-        self.root.title("Binance合约价格监控")
-        self.root.geometry("1000x700")
+        self.root.title("Binance合约价格监控与回测系统")
+        self.root.geometry("1200x800")
         
         self.is_running = False
         self.update_interval = 1  # 更新间隔（秒）
@@ -30,8 +32,28 @@ class BinanceMonitor:
         self.setup_ui()
         
     def setup_ui(self):
+        # 创建Notebook（标签页）
+        notebook = ttk.Notebook(self.root)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # 实时监控标签页
+        monitor_tab = ttk.Frame(notebook)
+        notebook.add(monitor_tab, text="实时监控")
+        self.setup_monitor_tab(monitor_tab)
+        
+        # 回测标签页
+        backtest_tab = ttk.Frame(notebook)
+        notebook.add(backtest_tab, text="策略回测")
+        self.setup_backtest_tab(backtest_tab)
+        
+        # 状态栏
+        self.status_label = ttk.Label(self.root, text="就绪", relief=tk.SUNKEN, anchor=tk.W)
+        self.status_label.pack(side=tk.BOTTOM, fill=tk.X)
+    
+    def setup_monitor_tab(self, parent):
+        """设置实时监控标签页"""
         # 顶部输入框架
-        input_frame = ttk.Frame(self.root, padding="10")
+        input_frame = ttk.Frame(parent, padding="10")
         input_frame.pack(fill=tk.X)
         
         ttk.Label(input_frame, text="交易对:").pack(side=tk.LEFT)
@@ -46,7 +68,7 @@ class BinanceMonitor:
         self.stop_btn.pack(side=tk.LEFT)
         
         # 价格显示框架
-        price_frame = ttk.LabelFrame(self.root, text="实时价格", padding="10")
+        price_frame = ttk.LabelFrame(parent, text="实时价格", padding="10")
         price_frame.pack(fill=tk.X, padx=10, pady=5)
         
         self.price_label = ttk.Label(price_frame, text="--", font=("Arial", 24, "bold"))
@@ -56,7 +78,7 @@ class BinanceMonitor:
         self.info_label.pack(side=tk.LEFT)
         
         # K线图框架
-        chart_frame = ttk.LabelFrame(self.root, text="1分钟K线图", padding="10")
+        chart_frame = ttk.LabelFrame(parent, text="1分钟K线图", padding="10")
         chart_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
         # 创建matplotlib图表
@@ -64,10 +86,61 @@ class BinanceMonitor:
         self.ax = self.fig.add_subplot(111)
         self.canvas = FigureCanvasTkAgg(self.fig, master=chart_frame)
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+    
+    def setup_backtest_tab(self, parent):
+        """设置回测标签页"""
+        # 参数设置框架
+        param_frame = ttk.LabelFrame(parent, text="回测参数", padding="10")
+        param_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        # 状态栏
-        self.status_label = ttk.Label(self.root, text="就绪", relief=tk.SUNKEN, anchor=tk.W)
-        self.status_label.pack(side=tk.BOTTOM, fill=tk.X)
+        # 交易对
+        row1 = ttk.Frame(param_frame)
+        row1.pack(fill=tk.X, pady=5)
+        ttk.Label(row1, text="交易对:", width=12).pack(side=tk.LEFT)
+        self.bt_symbol_entry = ttk.Entry(row1, width=20)
+        self.bt_symbol_entry.insert(0, "BTCUSDT")
+        self.bt_symbol_entry.pack(side=tk.LEFT, padx=5)
+        
+        # K线数量
+        ttk.Label(row1, text="K线数量:", width=12).pack(side=tk.LEFT, padx=(20, 0))
+        self.bt_limit_entry = ttk.Entry(row1, width=10)
+        self.bt_limit_entry.insert(0, "500")
+        self.bt_limit_entry.pack(side=tk.LEFT, padx=5)
+        
+        # 买入策略
+        row2 = ttk.Frame(param_frame)
+        row2.pack(fill=tk.X, pady=5)
+        ttk.Label(row2, text="买入策略:", width=12).pack(side=tk.LEFT)
+        self.buy_strategy_var = tk.StringVar(value=list(STRATEGIES.keys())[0])
+        self.buy_strategy_combo = ttk.Combobox(row2, textvariable=self.buy_strategy_var, 
+                                                values=list(STRATEGIES.keys()), width=18, state="readonly")
+        self.buy_strategy_combo.pack(side=tk.LEFT, padx=5)
+        
+        # 卖出策略
+        ttk.Label(row2, text="卖出策略:", width=12).pack(side=tk.LEFT, padx=(20, 0))
+        self.sell_strategy_var = tk.StringVar(value=list(STRATEGIES.keys())[0])
+        self.sell_strategy_combo = ttk.Combobox(row2, textvariable=self.sell_strategy_var,
+                                                 values=list(STRATEGIES.keys()), width=18, state="readonly")
+        self.sell_strategy_combo.pack(side=tk.LEFT, padx=5)
+        
+        # 初始资金
+        row3 = ttk.Frame(param_frame)
+        row3.pack(fill=tk.X, pady=5)
+        ttk.Label(row3, text="初始资金:", width=12).pack(side=tk.LEFT)
+        self.capital_entry = ttk.Entry(row3, width=20)
+        self.capital_entry.insert(0, "10000")
+        self.capital_entry.pack(side=tk.LEFT, padx=5)
+        
+        # 开始回测按钮
+        self.backtest_btn = ttk.Button(row3, text="开始回测", command=self.run_backtest)
+        self.backtest_btn.pack(side=tk.LEFT, padx=20)
+        
+        # 结果显示框架
+        result_frame = ttk.LabelFrame(parent, text="回测结果", padding="10")
+        result_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        self.result_text = scrolledtext.ScrolledText(result_frame, height=20, font=("Consolas", 10))
+        self.result_text.pack(fill=tk.BOTH, expand=True)
         
     def get_klines(self, symbol, limit=60):
         """获取K线数据"""
@@ -187,6 +260,82 @@ class BinanceMonitor:
         self.stop_btn.config(state=tk.DISABLED)
         self.symbol_entry.config(state=tk.NORMAL)
         self.status_label.config(text="已停止")
+    
+    def run_backtest(self):
+        """运行回测"""
+        try:
+            # 获取参数
+            symbol = self.bt_symbol_entry.get().upper()
+            limit = int(self.bt_limit_entry.get())
+            initial_capital = float(self.capital_entry.get())
+            buy_strategy_name = self.buy_strategy_var.get()
+            sell_strategy_name = self.sell_strategy_var.get()
+            
+            self.result_text.delete(1.0, tk.END)
+            self.result_text.insert(tk.END, "正在获取历史数据...\n")
+            self.status_label.config(text="回测中...")
+            self.backtest_btn.config(state=tk.DISABLED)
+            
+            # 在新线程中运行回测
+            thread = threading.Thread(target=self._run_backtest_thread, 
+                                     args=(symbol, limit, initial_capital, 
+                                          buy_strategy_name, sell_strategy_name),
+                                     daemon=True)
+            thread.start()
+            
+        except Exception as e:
+            messagebox.showerror("错误", f"回测参数错误: {str(e)}")
+    
+    def _run_backtest_thread(self, symbol, limit, initial_capital, buy_strategy_name, sell_strategy_name):
+        """回测线程"""
+        try:
+            # 获取历史K线数据
+            klines = self.get_klines(symbol, limit)
+            
+            self.result_text.insert(tk.END, f"获取到 {len(klines)} 根K线数据\n")
+            self.result_text.insert(tk.END, f"买入策略: {buy_strategy_name}\n")
+            self.result_text.insert(tk.END, f"卖出策略: {sell_strategy_name}\n")
+            self.result_text.insert(tk.END, "=" * 60 + "\n\n")
+            
+            # 创建策略实例
+            buy_strategy = get_strategy(buy_strategy_name)
+            sell_strategy = get_strategy(sell_strategy_name)
+            
+            # 运行回测
+            engine = BacktestEngine(initial_capital)
+            result = engine.run(klines, buy_strategy, sell_strategy)
+            
+            # 显示结果
+            self.result_text.insert(tk.END, "回测结果:\n")
+            self.result_text.insert(tk.END, "-" * 60 + "\n")
+            self.result_text.insert(tk.END, f"初始资金: ${result['initial_capital']:,.2f}\n")
+            self.result_text.insert(tk.END, f"最终资金: ${result['final_value']:,.2f}\n")
+            self.result_text.insert(tk.END, f"收益金额: ${result['profit']:,.2f}\n")
+            self.result_text.insert(tk.END, f"收益率: {result['profit_rate']:.2f}%\n")
+            self.result_text.insert(tk.END, f"交易次数: {result['total_trades']}\n")
+            self.result_text.insert(tk.END, "\n" + "=" * 60 + "\n\n")
+            
+            # 显示交易记录
+            if result['trades']:
+                self.result_text.insert(tk.END, "交易记录:\n")
+                self.result_text.insert(tk.END, "-" * 60 + "\n")
+                for i, trade in enumerate(result['trades'], 1):
+                    time_str = trade['time'].strftime("%Y-%m-%d %H:%M:%S")
+                    self.result_text.insert(tk.END, 
+                        f"{i}. [{time_str}] {trade['type']} - "
+                        f"价格: ${trade['price']:,.2f}, "
+                        f"数量: {trade['amount']:.6f}, "
+                        f"资金: ${trade['capital']:,.2f}\n")
+            else:
+                self.result_text.insert(tk.END, "无交易记录\n")
+            
+            self.status_label.config(text="回测完成")
+            
+        except Exception as e:
+            self.result_text.insert(tk.END, f"\n错误: {str(e)}\n")
+            self.status_label.config(text=f"回测失败: {str(e)}")
+        finally:
+            self.backtest_btn.config(state=tk.NORMAL)
 
 
 def main():
