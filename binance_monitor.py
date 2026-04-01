@@ -17,6 +17,8 @@ import matplotlib.dates as mdates
 from collections import deque
 from strategy import get_strategy, STRATEGIES
 from backtest import BacktestEngine
+import websocket
+import json
 
 
 class BinanceMonitor:
@@ -29,6 +31,8 @@ class BinanceMonitor:
         self.update_interval = 1  # 更新间隔（秒）
         self.klines = deque(maxlen=60)  # 保存最近60根K线
         self.price_precision = 2  # 价格精度
+        self.ws = None  # WebSocket连接
+        self.current_price = 0  # 当前价格
         
         self.setup_ui()
         
@@ -154,6 +158,50 @@ class BinanceMonitor:
         else:
             return 8
     
+    def on_ws_message(self, ws, message):
+        """WebSocket消息处理"""
+        try:
+            data = json.loads(message)
+            if 'c' in data:  # 最新价格
+                self.current_price = float(data['c'])
+        except Exception as e:
+            print(f"WebSocket消息处理错误: {e}")
+    
+    def on_ws_error(self, ws, error):
+        """WebSocket错误处理"""
+        print(f"WebSocket错误: {error}")
+    
+    def on_ws_close(self, ws, close_status_code, close_msg):
+        """WebSocket关闭处理"""
+        print("WebSocket连接已关闭")
+    
+    def on_ws_open(self, ws):
+        """WebSocket连接打开"""
+        print("WebSocket连接已建立")
+    
+    def start_websocket(self, symbol):
+        """启动WebSocket连接"""
+        if self.ws:
+            self.ws.close()
+        
+        # 使用代理
+        ws_url = f"wss://fstream.binance.com/ws/{symbol.lower()}@ticker"
+        self.ws = websocket.WebSocketApp(
+            ws_url,
+            on_message=self.on_ws_message,
+            on_error=self.on_ws_error,
+            on_close=self.on_ws_close,
+            on_open=self.on_ws_open
+        )
+        
+        # 在新线程中运行WebSocket
+        ws_thread = threading.Thread(target=lambda: self.ws.run_forever(
+            http_proxy_host="127.0.0.1",
+            http_proxy_port=7890,
+            proxy_type="http"
+        ), daemon=True)
+        ws_thread.start()
+    
     def get_klines(self, symbol, limit=60):
         """获取连续合约K线数据"""
         try:
@@ -229,12 +277,16 @@ class BinanceMonitor:
             try:
                 symbol = self.symbol_entry.get().upper()
                 
-                # 获取K线数据
+                # 获取K线数据（每次更新）
                 klines_data = self.get_klines(symbol)
                 self.klines = deque(klines_data, maxlen=60)
                 
-                # 获取当前价格
-                price = self.get_futures_price(symbol)
+                # 使用WebSocket获取的实时价格
+                if self.current_price > 0:
+                    price = self.current_price
+                else:
+                    # 如果WebSocket还没有数据，使用REST API
+                    price = self.get_futures_price(symbol)
                 
                 # 根据价格自动调整精度
                 self.price_precision = self.get_price_precision(price)
@@ -242,7 +294,7 @@ class BinanceMonitor:
                 current_time = datetime.now().strftime("%H:%M:%S")
                 
                 self.price_label.config(text=f"${price:.{self.price_precision}f}")
-                self.info_label.config(text=f"{symbol} | 更新时间: {current_time}")
+                self.info_label.config(text=f"{symbol} | 更新时间: {current_time} | WebSocket")
                 self.status_label.config(text=f"监控中... | 最后更新: {current_time}")
                 
                 # 更新K线图
@@ -264,6 +316,10 @@ class BinanceMonitor:
         self.stop_btn.config(state=tk.NORMAL)
         self.symbol_entry.config(state=tk.DISABLED)
         
+        # 启动WebSocket连接
+        symbol = self.symbol_entry.get().upper()
+        self.start_websocket(symbol)
+        
         # 在新线程中运行更新
         self.monitor_thread = threading.Thread(target=self.update_price, daemon=True)
         self.monitor_thread.start()
@@ -271,6 +327,12 @@ class BinanceMonitor:
     def stop_monitoring(self):
         """停止监控"""
         self.is_running = False
+        
+        # 关闭WebSocket连接
+        if self.ws:
+            self.ws.close()
+            self.ws = None
+        
         self.start_btn.config(state=tk.NORMAL)
         self.stop_btn.config(state=tk.DISABLED)
         self.symbol_entry.config(state=tk.NORMAL)
