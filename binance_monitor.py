@@ -20,6 +20,7 @@ from backtest import BacktestEngine
 import websocket
 import json
 from config import Config
+from select import get_select_strategy, SELECT_STRATEGIES
 
 
 class BinanceMonitor:
@@ -55,6 +56,11 @@ class BinanceMonitor:
         backtest_tab = ttk.Frame(notebook)
         notebook.add(backtest_tab, text="策略回测")
         self.setup_backtest_tab(backtest_tab)
+        
+        # 筛选标签页
+        select_tab = ttk.Frame(notebook)
+        notebook.add(select_tab, text="合约筛选")
+        self.setup_select_tab(select_tab)
         
         # 状态栏
         self.status_label = ttk.Label(self.root, text="就绪", relief=tk.SUNKEN, anchor=tk.W)
@@ -182,6 +188,46 @@ class BinanceMonitor:
         
         self.result_text = scrolledtext.ScrolledText(result_frame, height=20, font=("Consolas", 10))
         self.result_text.pack(fill=tk.BOTH, expand=True)
+    
+    def setup_select_tab(self, parent):
+        """设置筛选标签页"""
+        # 参数设置框架
+        param_frame = ttk.LabelFrame(parent, text="筛选参数", padding="10")
+        param_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        # K线周期和数量
+        row1 = ttk.Frame(param_frame)
+        row1.pack(fill=tk.X, pady=5)
+        ttk.Label(row1, text="K线周期:", width=12).pack(side=tk.LEFT)
+        self.select_interval_var = tk.StringVar(value="15m")
+        self.select_interval_combo = ttk.Combobox(row1, textvariable=self.select_interval_var,
+                                                  values=["1m", "3m", "5m", "15m"], width=10, state="readonly")
+        self.select_interval_combo.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Label(row1, text="K线数量:", width=12).pack(side=tk.LEFT, padx=(20, 0))
+        self.select_limit_entry = ttk.Entry(row1, width=10)
+        self.select_limit_entry.insert(0, "100")
+        self.select_limit_entry.pack(side=tk.LEFT, padx=5)
+        
+        # 筛选策略
+        row2 = ttk.Frame(param_frame)
+        row2.pack(fill=tk.X, pady=5)
+        ttk.Label(row2, text="筛选策略:", width=12).pack(side=tk.LEFT)
+        self.select_strategy_var = tk.StringVar(value=list(SELECT_STRATEGIES.keys())[0])
+        self.select_strategy_combo = ttk.Combobox(row2, textvariable=self.select_strategy_var,
+                                                  values=list(SELECT_STRATEGIES.keys()), width=30, state="readonly")
+        self.select_strategy_combo.pack(side=tk.LEFT, padx=5)
+        
+        # 开始筛选按钮
+        self.select_btn = ttk.Button(row2, text="开始筛选", command=self.run_select)
+        self.select_btn.pack(side=tk.LEFT, padx=20)
+        
+        # 结果显示框架
+        result_frame = ttk.LabelFrame(parent, text="筛选结果", padding="10")
+        result_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        self.select_result_text = scrolledtext.ScrolledText(result_frame, height=20, font=("Consolas", 10))
+        self.select_result_text.pack(fill=tk.BOTH, expand=True)
         
     def get_price_precision(self, price):
         """根据价格自动计算精度"""
@@ -542,6 +588,123 @@ class BinanceMonitor:
             self.status_label.config(text=f"回测失败: {str(e)}")
         finally:
             self.backtest_btn.config(state=tk.NORMAL)
+    
+    def run_select(self):
+        """运行筛选"""
+        try:
+            interval = self.select_interval_var.get()
+            limit = int(self.select_limit_entry.get())
+            strategy_name = self.select_strategy_var.get()
+            
+            self.select_result_text.delete(1.0, tk.END)
+            self.select_result_text.insert(tk.END, "正在获取合约列表...\n")
+            self.status_label.config(text="筛选中...")
+            self.select_btn.config(state=tk.DISABLED)
+            
+            # 在新线程中运行筛选
+            thread = threading.Thread(target=self._run_select_thread,
+                                     args=(interval, limit, strategy_name),
+                                     daemon=True)
+            thread.start()
+            
+        except Exception as e:
+            messagebox.showerror("错误", f"筛选参数错误: {str(e)}")
+    
+    def _run_select_thread(self, interval, limit, strategy_name):
+        """筛选线程"""
+        try:
+            # 获取所有USDT永续合约
+            symbols = self.get_all_usdt_symbols()
+            
+            self.select_result_text.insert(tk.END, f"获取到 {len(symbols)} 个USDT永续合约\n")
+            self.select_result_text.insert(tk.END, f"K线周期: {interval}\n")
+            self.select_result_text.insert(tk.END, f"K线数量: {limit}\n")
+            self.select_result_text.insert(tk.END, f"筛选策略: {strategy_name}\n")
+            self.select_result_text.insert(tk.END, "=" * 60 + "\n\n")
+            
+            # 获取筛选策略
+            strategy = get_select_strategy(strategy_name)
+            
+            # 筛选结果
+            results = []
+            
+            for i, symbol in enumerate(symbols, 1):
+                try:
+                    # 更新进度
+                    self.status_label.config(text=f"筛选中... {i}/{len(symbols)} - {symbol}")
+                    
+                    # 获取K线数据
+                    klines = self.get_klines_with_interval(symbol, interval, limit)
+                    
+                    # 检查是否符合条件
+                    is_match, value = strategy.check(klines)
+                    
+                    if is_match:
+                        current_price = float(klines[-1][4])
+                        results.append({
+                            'symbol': symbol,
+                            'price': current_price,
+                            'value': value
+                        })
+                        
+                        # 实时显示符合条件的合约
+                        self.select_result_text.insert(tk.END, 
+                            f"{symbol}: ${current_price:.4f} - {value*100:.2f}%\n")
+                    
+                    # 避免请求过快
+                    time.sleep(0.1)
+                    
+                except Exception as e:
+                    # 跳过出错的合约
+                    continue
+            
+            # 显示汇总
+            self.select_result_text.insert(tk.END, "\n" + "=" * 60 + "\n")
+            self.select_result_text.insert(tk.END, f"筛选完成！共找到 {len(results)} 个符合条件的合约\n")
+            
+            # 按值排序显示
+            if results:
+                results.sort(key=lambda x: x['value'], reverse=True)
+                self.select_result_text.insert(tk.END, "\n排序结果（按幅度从大到小）:\n")
+                self.select_result_text.insert(tk.END, "-" * 60 + "\n")
+                for i, result in enumerate(results, 1):
+                    self.select_result_text.insert(tk.END,
+                        f"{i}. {result['symbol']}: ${result['price']:.4f} - {result['value']*100:.2f}%\n")
+            
+            self.status_label.config(text="筛选完成")
+            
+        except Exception as e:
+            self.select_result_text.insert(tk.END, f"\n错误: {str(e)}\n")
+            self.status_label.config(text=f"筛选失败: {str(e)}")
+        finally:
+            self.select_btn.config(state=tk.NORMAL)
+    
+    def get_all_usdt_symbols(self):
+        """获取所有USDT永续合约交易对"""
+        try:
+            url = "https://fapi.binance.com/fapi/v1/exchangeInfo"
+            proxies = {
+                'http': 'http://127.0.0.1:7890',
+                'https': 'http://127.0.0.1:7890'
+            }
+            response = requests.get(url, proxies=proxies, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            
+            # 筛选USDT永续合约
+            symbols = []
+            for symbol_info in data['symbols']:
+                if (symbol_info['contractType'] == 'PERPETUAL' and 
+                    symbol_info['quoteAsset'] == 'USDT' and
+                    symbol_info['status'] == 'TRADING'):
+                    symbols.append(symbol_info['symbol'])
+            
+            return symbols
+        except Exception as e:
+            raise Exception(f"获取合约列表失败: {str(e)}")
+
+
+def main():
 
 
 def main():
