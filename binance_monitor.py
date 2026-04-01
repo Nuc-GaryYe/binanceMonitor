@@ -28,6 +28,7 @@ class BinanceMonitor:
         self.is_running = False
         self.update_interval = 1  # 更新间隔（秒）
         self.klines = deque(maxlen=60)  # 保存最近60根K线
+        self.price_precision = 2  # 价格精度
         
         self.setup_ui()
         
@@ -142,6 +143,17 @@ class BinanceMonitor:
         self.result_text = scrolledtext.ScrolledText(result_frame, height=20, font=("Consolas", 10))
         self.result_text.pack(fill=tk.BOTH, expand=True)
         
+    def get_price_precision(self, price):
+        """根据价格自动计算精度"""
+        if price >= 1000:
+            return 2
+        elif price >= 1:
+            return 4
+        elif price >= 0.01:
+            return 6
+        else:
+            return 8
+    
     def get_klines(self, symbol, limit=60):
         """获取连续合约K线数据"""
         try:
@@ -224,9 +236,12 @@ class BinanceMonitor:
                 # 获取当前价格
                 price = self.get_futures_price(symbol)
                 
+                # 根据价格自动调整精度
+                self.price_precision = self.get_price_precision(price)
+                
                 current_time = datetime.now().strftime("%H:%M:%S")
                 
-                self.price_label.config(text=f"${price:,.2f}")
+                self.price_label.config(text=f"${price:.{self.price_precision}f}")
                 self.info_label.config(text=f"{symbol} | 更新时间: {current_time}")
                 self.status_label.config(text=f"监控中... | 最后更新: {current_time}")
                 
@@ -308,9 +323,9 @@ class BinanceMonitor:
             # 显示结果
             self.result_text.insert(tk.END, "回测结果:\n")
             self.result_text.insert(tk.END, "-" * 60 + "\n")
-            self.result_text.insert(tk.END, f"初始资金: ${result['initial_capital']:,.2f}\n")
-            self.result_text.insert(tk.END, f"最终资金: ${result['final_value']:,.2f}\n")
-            self.result_text.insert(tk.END, f"收益金额: ${result['profit']:,.2f}\n")
+            self.result_text.insert(tk.END, f"初始资金: ${result['initial_capital']:.2f}\n")
+            self.result_text.insert(tk.END, f"最终资金: ${result['final_value']:.2f}\n")
+            self.result_text.insert(tk.END, f"收益金额: ${result['profit']:.2f}\n")
             self.result_text.insert(tk.END, f"收益率: {result['profit_rate']:.2f}%\n")
             self.result_text.insert(tk.END, f"交易次数: {result['total_trades']}\n")
             self.result_text.insert(tk.END, "\n" + "=" * 60 + "\n\n")
@@ -319,13 +334,18 @@ class BinanceMonitor:
             if result['trades']:
                 self.result_text.insert(tk.END, "交易记录:\n")
                 self.result_text.insert(tk.END, "-" * 60 + "\n")
+                
+                # 获取价格精度
+                avg_price = sum(t['price'] for t in result['trades']) / len(result['trades'])
+                precision = self.get_price_precision(avg_price)
+                
                 for i, trade in enumerate(result['trades'], 1):
                     time_str = trade['time'].strftime("%Y-%m-%d %H:%M:%S")
                     self.result_text.insert(tk.END, 
                         f"{i}. [{time_str}] {trade['type']} - "
-                        f"价格: ${trade['price']:,.2f}, "
+                        f"价格: ${trade['price']:.{precision}f}, "
                         f"数量: {trade['amount']:.6f}, "
-                        f"资金: ${trade['capital']:,.2f}\n")
+                        f"资金: ${trade['capital']:.2f}\n")
             else:
                 self.result_text.insert(tk.END, "无交易记录\n")
             
