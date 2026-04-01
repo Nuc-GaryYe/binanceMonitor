@@ -38,6 +38,9 @@ class BinanceMonitor:
         # 加载配置
         self.config = Config()
         
+        # 绑定窗口关闭事件
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
         self.setup_ui()
         self.load_config_to_ui()
         
@@ -334,13 +337,38 @@ class BinanceMonitor:
         
         # 关闭WebSocket连接
         if self.ws:
-            self.ws.close()
+            try:
+                self.ws.close()
+            except:
+                pass
             self.ws = None
         
         self.start_btn.config(state=tk.NORMAL)
         self.stop_btn.config(state=tk.DISABLED)
         self.symbol_entry.config(state=tk.NORMAL)
         self.status_label.config(text="已停止")
+    
+    def on_closing(self):
+        """窗口关闭事件处理"""
+        # 停止监控
+        self.is_running = False
+        
+        # 关闭WebSocket连接
+        if self.ws:
+            try:
+                self.ws.close()
+            except:
+                pass
+        
+        # 关闭matplotlib图表
+        try:
+            plt.close('all')
+        except:
+            pass
+        
+        # 销毁窗口
+        self.root.quit()
+        self.root.destroy()
     
     def run_backtest(self):
         """运行回测"""
