@@ -19,7 +19,7 @@ class BinanceMonitor:
         self.root.geometry("600x400")
         
         self.is_running = False
-        self.update_interval = 2  # 更新间隔（秒）
+        self.update_interval = 1  # 更新间隔（秒）
         
         self.setup_ui()
         
