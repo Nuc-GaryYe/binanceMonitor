@@ -19,6 +19,7 @@ from strategy import get_strategy, STRATEGIES
 from backtest import BacktestEngine
 import websocket
 import json
+from config import Config
 
 
 class BinanceMonitor:
@@ -34,7 +35,11 @@ class BinanceMonitor:
         self.ws = None  # WebSocket连接
         self.current_price = 0  # 当前价格
         
+        # 加载配置
+        self.config = Config()
+        
         self.setup_ui()
+        self.load_config_to_ui()
         
     def setup_ui(self):
         # 创建Notebook（标签页）
@@ -63,7 +68,6 @@ class BinanceMonitor:
         
         ttk.Label(input_frame, text="交易对:").pack(side=tk.LEFT)
         self.symbol_entry = ttk.Entry(input_frame, width=20)
-        self.symbol_entry.insert(0, "BTCUSDT")
         self.symbol_entry.pack(side=tk.LEFT, padx=5)
         
         self.start_btn = ttk.Button(input_frame, text="开始监控", command=self.start_monitoring)
@@ -103,27 +107,25 @@ class BinanceMonitor:
         row1.pack(fill=tk.X, pady=5)
         ttk.Label(row1, text="交易对:", width=12).pack(side=tk.LEFT)
         self.bt_symbol_entry = ttk.Entry(row1, width=20)
-        self.bt_symbol_entry.insert(0, "BTCUSDT")
         self.bt_symbol_entry.pack(side=tk.LEFT, padx=5)
         
         # K线数量
         ttk.Label(row1, text="K线数量:", width=12).pack(side=tk.LEFT, padx=(20, 0))
         self.bt_limit_entry = ttk.Entry(row1, width=10)
-        self.bt_limit_entry.insert(0, "500")
         self.bt_limit_entry.pack(side=tk.LEFT, padx=5)
         
         # 买入策略
         row2 = ttk.Frame(param_frame)
         row2.pack(fill=tk.X, pady=5)
         ttk.Label(row2, text="买入策略:", width=12).pack(side=tk.LEFT)
-        self.buy_strategy_var = tk.StringVar(value=list(STRATEGIES.keys())[0])
+        self.buy_strategy_var = tk.StringVar()
         self.buy_strategy_combo = ttk.Combobox(row2, textvariable=self.buy_strategy_var, 
                                                 values=list(STRATEGIES.keys()), width=18, state="readonly")
         self.buy_strategy_combo.pack(side=tk.LEFT, padx=5)
         
         # 卖出策略
         ttk.Label(row2, text="卖出策略:", width=12).pack(side=tk.LEFT, padx=(20, 0))
-        self.sell_strategy_var = tk.StringVar(value=list(STRATEGIES.keys())[0])
+        self.sell_strategy_var = tk.StringVar()
         self.sell_strategy_combo = ttk.Combobox(row2, textvariable=self.sell_strategy_var,
                                                  values=list(STRATEGIES.keys()), width=18, state="readonly")
         self.sell_strategy_combo.pack(side=tk.LEFT, padx=5)
@@ -133,7 +135,6 @@ class BinanceMonitor:
         row3.pack(fill=tk.X, pady=5)
         ttk.Label(row3, text="初始资金:", width=12).pack(side=tk.LEFT)
         self.capital_entry = ttk.Entry(row3, width=20)
-        self.capital_entry.insert(0, "10000")
         self.capital_entry.pack(side=tk.LEFT, padx=5)
         
         # 开始回测按钮
@@ -310,6 +311,10 @@ class BinanceMonitor:
         if not self.symbol_entry.get().strip():
             messagebox.showwarning("警告", "请输入交易对符号")
             return
+        
+        # 保存配置
+        symbol = self.symbol_entry.get().upper()
+        self.config.set("monitor", "symbol", symbol)
             
         self.is_running = True
         self.start_btn.config(state=tk.DISABLED)
@@ -317,7 +322,6 @@ class BinanceMonitor:
         self.symbol_entry.config(state=tk.DISABLED)
         
         # 启动WebSocket连接
-        symbol = self.symbol_entry.get().upper()
         self.start_websocket(symbol)
         
         # 在新线程中运行更新
@@ -348,6 +352,13 @@ class BinanceMonitor:
             buy_strategy_name = self.buy_strategy_var.get()
             sell_strategy_name = self.sell_strategy_var.get()
             
+            # 保存配置
+            self.config.set("backtest", "symbol", symbol)
+            self.config.set("backtest", "limit", limit)
+            self.config.set("backtest", "initial_capital", initial_capital)
+            self.config.set("backtest", "buy_strategy", buy_strategy_name)
+            self.config.set("backtest", "sell_strategy", sell_strategy_name)
+            
             self.result_text.delete(1.0, tk.END)
             self.result_text.insert(tk.END, "正在获取历史数据...\n")
             self.status_label.config(text="回测中...")
@@ -362,6 +373,28 @@ class BinanceMonitor:
             
         except Exception as e:
             messagebox.showerror("错误", f"回测参数错误: {str(e)}")
+    
+    def load_config_to_ui(self):
+        """从配置加载到UI"""
+        # 加载监控配置
+        monitor_symbol = self.config.get("monitor", "symbol", "BTCUSDT")
+        self.symbol_entry.insert(0, monitor_symbol)
+        
+        # 加载回测配置
+        bt_symbol = self.config.get("backtest", "symbol", "BTCUSDT")
+        self.bt_symbol_entry.insert(0, bt_symbol)
+        
+        bt_limit = self.config.get("backtest", "limit", 500)
+        self.bt_limit_entry.insert(0, str(bt_limit))
+        
+        initial_capital = self.config.get("backtest", "initial_capital", 10000)
+        self.capital_entry.insert(0, str(initial_capital))
+        
+        buy_strategy = self.config.get("backtest", "buy_strategy", list(STRATEGIES.keys())[0])
+        self.buy_strategy_var.set(buy_strategy)
+        
+        sell_strategy = self.config.get("backtest", "sell_strategy", list(STRATEGIES.keys())[0])
+        self.sell_strategy_var.set(sell_strategy)
     
     def _run_backtest_thread(self, symbol, limit, initial_capital, buy_strategy_name, sell_strategy_name):
         """回测线程"""
@@ -418,6 +451,16 @@ class BinanceMonitor:
             self.status_label.config(text=f"回测失败: {str(e)}")
         finally:
             self.backtest_btn.config(state=tk.NORMAL)
+
+
+def main():
+    root = tk.Tk()
+    app = BinanceMonitor(root)
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    main()
 
 
 def main():

@@ -16,3 +16,6 @@ dist/
 .idea/
 *.swp
 *.swo
+
+# Config
+config.json
