@@ -57,7 +57,11 @@ class BinanceMonitor:
         """获取Binance合约价格"""
         try:
             url = f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={symbol}"
-            response = requests.get(url, timeout=5)
+            proxies = {
+                'http': 'http://127.0.0.1:7890',
+                'https': 'http://127.0.0.1:7890'
+            }
+            response = requests.get(url, proxies=proxies, timeout=5)
             response.raise_for_status()
             data = response.json()
             return float(data['price'])
