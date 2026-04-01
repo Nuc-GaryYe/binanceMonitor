@@ -620,6 +620,7 @@ class BinanceMonitor:
             self.select_result_text.insert(tk.END, f"K线周期: {interval}\n")
             self.select_result_text.insert(tk.END, f"K线数量: {limit}\n")
             self.select_result_text.insert(tk.END, f"筛选策略: {strategy_name}\n")
+            self.select_result_text.insert(tk.END, f"成交量过滤: 24h成交量 > $10,000,000\n")
             self.select_result_text.insert(tk.END, "=" * 60 + "\n\n")
             
             # 获取筛选策略
@@ -627,11 +628,22 @@ class BinanceMonitor:
             
             # 筛选结果
             results = []
+            skipped_count = 0
+            min_volume = 10000000  # 1000万USDT
             
             for i, symbol in enumerate(symbols, 1):
                 try:
                     # 更新进度
                     self.status_label.config(text=f"筛选中... {i}/{len(symbols)} - {symbol}")
+                    
+                    # 先获取24小时行情数据，检查成交量
+                    ticker = self.get_24h_ticker(symbol)
+                    volume_24h = float(ticker.get('quoteVolume', 0))
+                    
+                    # 成交量过滤：低于1000万直接跳过
+                    if volume_24h < min_volume:
+                        skipped_count += 1
+                        continue
                     
                     # 获取K线数据
                     klines = self.get_klines_with_interval(symbol, interval, limit)
@@ -640,16 +652,12 @@ class BinanceMonitor:
                     is_match, value = strategy.check(klines)
                     
                     if is_match:
-                        # 获取24小时行情数据
-                        ticker = self.get_24h_ticker(symbol)
-                        
                         # 从K线获取最高最低价
                         highs = [float(k[2]) for k in klines]
                         lows = [float(k[3]) for k in klines]
                         high_price = max(highs)
                         low_price = min(lows)
                         current_price = float(klines[-1][4])
-                        volume_24h = float(ticker.get('quoteVolume', 0))
                         
                         results.append({
                             'symbol': symbol,
@@ -667,7 +675,7 @@ class BinanceMonitor:
                             f"24h成交量${volume_24h:,.0f} | 幅度{value*100:.2f}%\n")
                     
                     # 避免请求过快
-                    time.sleep(0.1)
+                    time.sleep(0.05)
                     
                 except Exception as e:
                     # 跳过出错的合约
@@ -675,7 +683,10 @@ class BinanceMonitor:
             
             # 显示汇总
             self.select_result_text.insert(tk.END, "\n" + "=" * 60 + "\n")
-            self.select_result_text.insert(tk.END, f"筛选完成！共找到 {len(results)} 个符合条件的合约\n")
+            self.select_result_text.insert(tk.END, f"筛选完成！\n")
+            self.select_result_text.insert(tk.END, f"总合约数: {len(symbols)}\n")
+            self.select_result_text.insert(tk.END, f"成交量过滤跳过: {skipped_count} 个\n")
+            self.select_result_text.insert(tk.END, f"符合条件: {len(results)} 个\n")
             
             # 按值排序显示
             if results:
