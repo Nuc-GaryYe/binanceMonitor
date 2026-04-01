@@ -9,10 +9,12 @@ from datetime import datetime
 
 class BacktestEngine:
     """回测引擎 - 支持5倍杠杆做多做空"""
-    def __init__(self, initial_capital=10000, leverage=5):
+    def __init__(self, initial_capital=10000, leverage=5, full_position=True):
         self.initial_capital = initial_capital
         self.capital = initial_capital
         self.leverage = leverage  # 杠杆倍数
+        self.full_position = full_position  # 是否全仓
+        self.fixed_margin = initial_capital  # 固定保证金（非全仓模式）
         self.position = 0  # 持仓数量（正数做多，负数做空）
         self.position_type = None  # 'LONG' 或 'SHORT'
         self.entry_price = 0  # 开仓价格
@@ -77,22 +79,40 @@ class BacktestEngine:
             'profit_rate': profit_rate,
             'trades': self.trades,
             'total_trades': len(self.trades),
-            'leverage': self.leverage
+            'leverage': self.leverage,
+            'position_mode': '全仓' if self.full_position else '固定仓位'
         }
+    
+    def get_margin(self):
+        """获取本次开仓使用的保证金"""
+        if self.full_position:
+            # 全仓模式：使用全部资金
+            return self.capital
+        else:
+            # 固定仓位模式：使用固定保证金，如果资金不足则全仓
+            return min(self.capital, self.fixed_margin)
     
     def open_long(self, price, time):
         """开多单"""
-        # 使用全部资金开多单（5倍杠杆）
-        position_value = self.capital * self.leverage
+        margin = self.get_margin()
+        if margin <= 0:
+            return  # 没有资金，无法开仓
+        
+        # 使用保证金开多单（杠杆）
+        position_value = margin * self.leverage
         self.position = position_value / price
         self.position_type = 'LONG'
         self.entry_price = price
+        
+        # 扣除保证金
+        self.capital -= margin
         
         self.trades.append({
             'time': time,
             'type': '开多',
             'price': price,
             'amount': self.position,
+            'margin': margin,
             'capital': self.capital,
             'leverage': self.leverage
         })
@@ -101,7 +121,16 @@ class BacktestEngine:
         """平多单"""
         # 计算盈亏
         profit = self.position * (price - self.entry_price)
-        self.capital += profit
+        
+        # 归还保证金并加上盈亏
+        if self.full_position:
+            # 全仓模式：归还初始保证金
+            margin_used = self.initial_capital - self.capital
+        else:
+            # 固定仓位模式：归还固定保证金
+            margin_used = min(self.fixed_margin, self.initial_capital - self.capital)
+        
+        self.capital += margin_used + profit
         
         self.trades.append({
             'time': time,
@@ -118,17 +147,25 @@ class BacktestEngine:
     
     def open_short(self, price, time):
         """开空单"""
-        # 使用全部资金开空单（5倍杠杆）
-        position_value = self.capital * self.leverage
+        margin = self.get_margin()
+        if margin <= 0:
+            return  # 没有资金，无法开仓
+        
+        # 使用保证金开空单（杠杆）
+        position_value = margin * self.leverage
         self.position = position_value / price
         self.position_type = 'SHORT'
         self.entry_price = price
+        
+        # 扣除保证金
+        self.capital -= margin
         
         self.trades.append({
             'time': time,
             'type': '开空',
             'price': price,
             'amount': self.position,
+            'margin': margin,
             'capital': self.capital,
             'leverage': self.leverage
         })
@@ -137,7 +174,16 @@ class BacktestEngine:
         """平空单"""
         # 计算盈亏（做空时价格下跌盈利）
         profit = self.position * (self.entry_price - price)
-        self.capital += profit
+        
+        # 归还保证金并加上盈亏
+        if self.full_position:
+            # 全仓模式：归还初始保证金
+            margin_used = self.initial_capital - self.capital
+        else:
+            # 固定仓位模式：归还固定保证金
+            margin_used = min(self.fixed_margin, self.initial_capital - self.capital)
+        
+        self.capital += margin_used + profit
         
         self.trades.append({
             'time': time,
@@ -169,8 +215,13 @@ class BacktestEngine:
     def liquidate(self, price, time):
         """强制平仓（爆仓）"""
         # 爆仓损失全部保证金
-        loss = -self.capital
-        self.capital = 0
+        if self.full_position:
+            margin_used = self.initial_capital - self.capital
+        else:
+            margin_used = min(self.fixed_margin, self.initial_capital - self.capital)
+        
+        loss = -margin_used
+        # 资金不变（保证金已经扣除）
         
         self.trades.append({
             'time': time,

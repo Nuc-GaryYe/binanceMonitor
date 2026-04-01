@@ -157,8 +157,17 @@ class BinanceMonitor:
         self.leverage_entry = ttk.Entry(row4, width=10)
         self.leverage_entry.pack(side=tk.LEFT, padx=5)
         
+        # 全仓选项
+        row5 = ttk.Frame(param_frame)
+        row5.pack(fill=tk.X, pady=5)
+        self.full_position_var = tk.BooleanVar(value=True)
+        self.full_position_check = ttk.Checkbutton(row5, text="全仓模式", variable=self.full_position_var)
+        self.full_position_check.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Label(row5, text="(取消勾选则使用固定仓位，每次开仓使用初始资金)", font=("Arial", 9)).pack(side=tk.LEFT, padx=5)
+        
         # 开始回测按钮
-        self.backtest_btn = ttk.Button(row4, text="开始回测", command=self.run_backtest)
+        self.backtest_btn = ttk.Button(row5, text="开始回测", command=self.run_backtest)
         self.backtest_btn.pack(side=tk.LEFT, padx=20)
         
         # 结果显示框架
@@ -370,6 +379,7 @@ class BinanceMonitor:
             limit = int(self.bt_limit_entry.get())
             initial_capital = float(self.capital_entry.get())
             leverage = int(self.leverage_entry.get())
+            full_position = self.full_position_var.get()
             long_strategy_name = self.long_strategy_var.get()
             close_long_strategy_name = self.close_long_strategy_var.get()
             short_strategy_name = self.short_strategy_var.get()
@@ -380,6 +390,7 @@ class BinanceMonitor:
             self.config.set("backtest", "limit", limit)
             self.config.set("backtest", "initial_capital", initial_capital)
             self.config.set("backtest", "leverage", leverage)
+            self.config.set("backtest", "full_position", full_position)
             self.config.set("backtest", "long_strategy", long_strategy_name)
             self.config.set("backtest", "close_long_strategy", close_long_strategy_name)
             self.config.set("backtest", "short_strategy", short_strategy_name)
@@ -392,7 +403,7 @@ class BinanceMonitor:
             
             # 在新线程中运行回测
             thread = threading.Thread(target=self._run_backtest_thread, 
-                                     args=(symbol, limit, initial_capital, leverage,
+                                     args=(symbol, limit, initial_capital, leverage, full_position,
                                           long_strategy_name, close_long_strategy_name,
                                           short_strategy_name, close_short_strategy_name),
                                      daemon=True)
@@ -420,6 +431,9 @@ class BinanceMonitor:
         leverage = self.config.get("backtest", "leverage", 5)
         self.leverage_entry.insert(0, str(leverage))
         
+        full_position = self.config.get("backtest", "full_position", True)
+        self.full_position_var.set(full_position)
+        
         long_strategy = self.config.get("backtest", "long_strategy", list(STRATEGIES.keys())[0])
         self.long_strategy_var.set(long_strategy)
         
@@ -432,7 +446,7 @@ class BinanceMonitor:
         close_short_strategy = self.config.get("backtest", "close_short_strategy", list(STRATEGIES.keys())[0])
         self.close_short_strategy_var.set(close_short_strategy)
     
-    def _run_backtest_thread(self, symbol, limit, initial_capital, leverage,
+    def _run_backtest_thread(self, symbol, limit, initial_capital, leverage, full_position,
                             long_strategy_name, close_long_strategy_name,
                             short_strategy_name, close_short_strategy_name):
         """回测线程"""
@@ -442,6 +456,7 @@ class BinanceMonitor:
             
             self.result_text.insert(tk.END, f"获取到 {len(klines)} 根K线数据\n")
             self.result_text.insert(tk.END, f"杠杆倍数: {leverage}x\n")
+            self.result_text.insert(tk.END, f"仓位模式: {'全仓' if full_position else '固定仓位'}\n")
             self.result_text.insert(tk.END, f"做多策略: {long_strategy_name}\n")
             self.result_text.insert(tk.END, f"平多策略: {close_long_strategy_name}\n")
             self.result_text.insert(tk.END, f"做空策略: {short_strategy_name}\n")
@@ -455,7 +470,7 @@ class BinanceMonitor:
             close_short_strategy = get_strategy(close_short_strategy_name)
             
             # 运行回测
-            engine = BacktestEngine(initial_capital, leverage)
+            engine = BacktestEngine(initial_capital, leverage, full_position)
             result = engine.run(klines, long_strategy, close_long_strategy, 
                               short_strategy, close_short_strategy)
             
@@ -468,6 +483,7 @@ class BinanceMonitor:
             self.result_text.insert(tk.END, f"收益率: {result['profit_rate']:.2f}%\n")
             self.result_text.insert(tk.END, f"交易次数: {result['total_trades']}\n")
             self.result_text.insert(tk.END, f"杠杆倍数: {result['leverage']}x\n")
+            self.result_text.insert(tk.END, f"仓位模式: {result['position_mode']}\n")
             self.result_text.insert(tk.END, "\n" + "=" * 60 + "\n\n")
             
             # 显示交易记录
@@ -497,6 +513,7 @@ class BinanceMonitor:
                             f"{i}. [{time_str}] {trade_type} - "
                             f"价格: ${trade['price']:.{precision}f}, "
                             f"数量: {trade['amount']:.6f}, "
+                            f"保证金: ${trade['margin']:.2f}, "
                             f"杠杆: {trade['leverage']}x, "
                             f"资金: ${trade['capital']:.2f}\n")
             else:

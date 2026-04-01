@@ -44,6 +44,7 @@ class Config:
                 "limit": 500,
                 "initial_capital": 10000,
                 "leverage": 5,
+                "full_position": True,
                 "long_strategy": "MA5/60交叉",
                 "close_long_strategy": "MA5/60交叉",
                 "short_strategy": "MA5/60交叉",
