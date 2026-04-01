@@ -143,9 +143,9 @@ class BinanceMonitor:
         self.result_text.pack(fill=tk.BOTH, expand=True)
         
     def get_klines(self, symbol, limit=60):
-        """获取K线数据"""
+        """获取连续合约K线数据"""
         try:
-            url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval=1m&limit={limit}"
+            url = f"https://fapi.binance.com/fapi/v1/continuousKlines?pair={symbol}&contractType=PERPETUAL&interval=1m&limit={limit}"
             proxies = {
                 'http': 'http://127.0.0.1:7890',
                 'https': 'http://127.0.0.1:7890'
@@ -154,7 +154,7 @@ class BinanceMonitor:
             response.raise_for_status()
             return response.json()
         except Exception as e:
-            raise Exception(f"获取K线数据失败: {str(e)}")
+            raise Exception(f"获取连续合约K线数据失败: {str(e)}")
     
     def get_futures_price(self, symbol):
         """获取Binance合约价格"""
