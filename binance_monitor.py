@@ -640,16 +640,31 @@ class BinanceMonitor:
                     is_match, value = strategy.check(klines)
                     
                     if is_match:
+                        # 获取24小时行情数据
+                        ticker = self.get_24h_ticker(symbol)
+                        
+                        # 从K线获取最高最低价
+                        highs = [float(k[2]) for k in klines]
+                        lows = [float(k[3]) for k in klines]
+                        high_price = max(highs)
+                        low_price = min(lows)
                         current_price = float(klines[-1][4])
+                        volume_24h = float(ticker.get('quoteVolume', 0))
+                        
                         results.append({
                             'symbol': symbol,
-                            'price': current_price,
+                            'current_price': current_price,
+                            'high_price': high_price,
+                            'low_price': low_price,
+                            'volume_24h': volume_24h,
                             'value': value
                         })
                         
                         # 实时显示符合条件的合约
                         self.select_result_text.insert(tk.END, 
-                            f"{symbol}: ${current_price:.4f} - {value*100:.2f}%\n")
+                            f"{symbol}: 当前${current_price:.4f} | "
+                            f"最高${high_price:.4f} | 最低${low_price:.4f} | "
+                            f"24h成交量${volume_24h:,.0f} | 幅度{value*100:.2f}%\n")
                     
                     # 避免请求过快
                     time.sleep(0.1)
@@ -667,9 +682,21 @@ class BinanceMonitor:
                 results.sort(key=lambda x: x['value'], reverse=True)
                 self.select_result_text.insert(tk.END, "\n排序结果（按幅度从大到小）:\n")
                 self.select_result_text.insert(tk.END, "-" * 60 + "\n")
+                self.select_result_text.insert(tk.END, 
+                    f"{'排名':<6}{'合约':<15}{'当前价格':<12}{'最高价':<12}{'最低价':<12}{'24h成交量':<15}{'幅度':<10}\n")
+                self.select_result_text.insert(tk.END, "-" * 60 + "\n")
+                
                 for i, result in enumerate(results, 1):
+                    # 获取价格精度
+                    precision = self.get_price_precision(result['current_price'])
+                    
                     self.select_result_text.insert(tk.END,
-                        f"{i}. {result['symbol']}: ${result['price']:.4f} - {result['value']*100:.2f}%\n")
+                        f"{i:<6}{result['symbol']:<15}"
+                        f"${result['current_price']:<11.{precision}f}"
+                        f"${result['high_price']:<11.{precision}f}"
+                        f"${result['low_price']:<11.{precision}f}"
+                        f"${result['volume_24h']:<14,.0f}"
+                        f"{result['value']*100:<9.2f}%\n")
             
             self.status_label.config(text="筛选完成")
             
@@ -702,10 +729,20 @@ class BinanceMonitor:
             return symbols
         except Exception as e:
             raise Exception(f"获取合约列表失败: {str(e)}")
-
-
-def main():
-
+    
+    def get_24h_ticker(self, symbol):
+        """获取24小时行情数据"""
+        try:
+            url = f"https://fapi.binance.com/fapi/v1/ticker/24hr?symbol={symbol}"
+            proxies = {
+                'http': 'http://127.0.0.1:7890',
+                'https': 'http://127.0.0.1:7890'
+            }
+            response = requests.get(url, proxies=proxies, timeout=5)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            return {}
 
 def main():
     root = tk.Tk()
