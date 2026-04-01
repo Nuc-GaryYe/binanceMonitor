@@ -89,8 +89,12 @@ class BacktestEngine:
             # 全仓模式：使用全部资金
             return self.capital
         else:
-            # 固定仓位模式：使用固定保证金，如果资金不足则全仓
-            return min(self.capital, self.fixed_margin)
+            # 固定仓位模式：始终使用固定保证金（初始资金），除非资金不足
+            if self.capital >= self.fixed_margin:
+                return self.fixed_margin
+            else:
+                # 资金不足时全仓
+                return self.capital
     
     def open_long(self, price, time):
         """开多单"""
@@ -122,13 +126,24 @@ class BacktestEngine:
         # 计算盈亏
         profit = self.position * (price - self.entry_price)
         
-        # 归还保证金并加上盈亏
+        # 计算本次使用的保证金
         if self.full_position:
-            # 全仓模式：归还初始保证金
-            margin_used = self.initial_capital - self.capital
+            # 全仓模式：计算实际使用的保证金
+            margin_used = self.initial_capital - self.capital if len(self.trades) == 1 else (
+                self.trades[-1]['capital'] if 'margin' not in self.trades[-1] else 
+                self.initial_capital - self.trades[-1]['capital']
+            )
+            # 简化：直接从开仓记录获取
+            for trade in reversed(self.trades):
+                if trade['type'] == '开多' and 'margin' in trade:
+                    margin_used = trade['margin']
+                    break
         else:
-            # 固定仓位模式：归还固定保证金
-            margin_used = min(self.fixed_margin, self.initial_capital - self.capital)
+            # 固定仓位模式：从开仓记录获取实际使用的保证金
+            for trade in reversed(self.trades):
+                if trade['type'] == '开多' and 'margin' in trade:
+                    margin_used = trade['margin']
+                    break
         
         self.capital += margin_used + profit
         
@@ -175,13 +190,11 @@ class BacktestEngine:
         # 计算盈亏（做空时价格下跌盈利）
         profit = self.position * (self.entry_price - price)
         
-        # 归还保证金并加上盈亏
-        if self.full_position:
-            # 全仓模式：归还初始保证金
-            margin_used = self.initial_capital - self.capital
-        else:
-            # 固定仓位模式：归还固定保证金
-            margin_used = min(self.fixed_margin, self.initial_capital - self.capital)
+        # 计算本次使用的保证金
+        for trade in reversed(self.trades):
+            if trade['type'] == '开空' and 'margin' in trade:
+                margin_used = trade['margin']
+                break
         
         self.capital += margin_used + profit
         
@@ -215,10 +228,12 @@ class BacktestEngine:
     def liquidate(self, price, time):
         """强制平仓（爆仓）"""
         # 爆仓损失全部保证金
-        if self.full_position:
-            margin_used = self.initial_capital - self.capital
-        else:
-            margin_used = min(self.fixed_margin, self.initial_capital - self.capital)
+        # 从最近的开仓记录获取保证金
+        margin_used = 0
+        for trade in reversed(self.trades):
+            if trade['type'] in ['开多', '开空'] and 'margin' in trade:
+                margin_used = trade['margin']
+                break
         
         loss = -margin_used
         # 资金不变（保证金已经扣除）
