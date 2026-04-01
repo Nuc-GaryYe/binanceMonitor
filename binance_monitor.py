@@ -441,17 +441,23 @@ class BinanceMonitor:
             klines = self.get_klines(symbol, limit)
             
             self.result_text.insert(tk.END, f"获取到 {len(klines)} 根K线数据\n")
-            self.result_text.insert(tk.END, f"买入策略: {buy_strategy_name}\n")
-            self.result_text.insert(tk.END, f"卖出策略: {sell_strategy_name}\n")
+            self.result_text.insert(tk.END, f"杠杆倍数: {leverage}x\n")
+            self.result_text.insert(tk.END, f"做多策略: {long_strategy_name}\n")
+            self.result_text.insert(tk.END, f"平多策略: {close_long_strategy_name}\n")
+            self.result_text.insert(tk.END, f"做空策略: {short_strategy_name}\n")
+            self.result_text.insert(tk.END, f"平空策略: {close_short_strategy_name}\n")
             self.result_text.insert(tk.END, "=" * 60 + "\n\n")
             
             # 创建策略实例
-            buy_strategy = get_strategy(buy_strategy_name)
-            sell_strategy = get_strategy(sell_strategy_name)
+            long_strategy = get_strategy(long_strategy_name)
+            close_long_strategy = get_strategy(close_long_strategy_name)
+            short_strategy = get_strategy(short_strategy_name)
+            close_short_strategy = get_strategy(close_short_strategy_name)
             
             # 运行回测
-            engine = BacktestEngine(initial_capital)
-            result = engine.run(klines, buy_strategy, sell_strategy)
+            engine = BacktestEngine(initial_capital, leverage)
+            result = engine.run(klines, long_strategy, close_long_strategy, 
+                              short_strategy, close_short_strategy)
             
             # 显示结果
             self.result_text.insert(tk.END, "回测结果:\n")
@@ -461,6 +467,7 @@ class BinanceMonitor:
             self.result_text.insert(tk.END, f"收益金额: ${result['profit']:.2f}\n")
             self.result_text.insert(tk.END, f"收益率: {result['profit_rate']:.2f}%\n")
             self.result_text.insert(tk.END, f"交易次数: {result['total_trades']}\n")
+            self.result_text.insert(tk.END, f"杠杆倍数: {result['leverage']}x\n")
             self.result_text.insert(tk.END, "\n" + "=" * 60 + "\n\n")
             
             # 显示交易记录
@@ -474,11 +481,24 @@ class BinanceMonitor:
                 
                 for i, trade in enumerate(result['trades'], 1):
                     time_str = trade['time'].strftime("%Y-%m-%d %H:%M:%S")
-                    self.result_text.insert(tk.END, 
-                        f"{i}. [{time_str}] {trade['type']} - "
-                        f"价格: ${trade['price']:.{precision}f}, "
-                        f"数量: {trade['amount']:.6f}, "
-                        f"资金: ${trade['capital']:.2f}\n")
+                    trade_type = trade['type']
+                    
+                    if 'profit' in trade:
+                        # 平仓或爆仓记录
+                        self.result_text.insert(tk.END, 
+                            f"{i}. [{time_str}] {trade_type} - "
+                            f"价格: ${trade['price']:.{precision}f}, "
+                            f"数量: {trade['amount']:.6f}, "
+                            f"盈亏: ${trade['profit']:.2f}, "
+                            f"资金: ${trade['capital']:.2f}\n")
+                    else:
+                        # 开仓记录
+                        self.result_text.insert(tk.END, 
+                            f"{i}. [{time_str}] {trade_type} - "
+                            f"价格: ${trade['price']:.{precision}f}, "
+                            f"数量: {trade['amount']:.6f}, "
+                            f"杠杆: {trade['leverage']}x, "
+                            f"资金: ${trade['capital']:.2f}\n")
             else:
                 self.result_text.insert(tk.END, "无交易记录\n")
             
