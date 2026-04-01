@@ -367,7 +367,6 @@ class BinanceMonitor:
             pass
         
         # 销毁窗口
-        self.root.quit()
         self.root.destroy()
     
     def run_backtest(self):
